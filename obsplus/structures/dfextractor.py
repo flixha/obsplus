@@ -7,10 +7,19 @@ from collections import UserDict
 from functools import singledispatch, reduce
 from typing import Mapping, Sequence, Optional, Dict
 
-import obspy
 import pandas as pd
 
-from obsplus.utils import iterate, order_columns
+from obsplus.constants import column_function_map_type, TIME_COLUMNS, NSLC
+from obsplus.utils.time import to_datetime64
+from obsplus.utils.pd import (
+    apply_funcs_to_columns,
+    order_columns,
+    cast_dtypes,
+    replace_or_swallow,
+)
+
+# Create a dictionary of standard column_name: funcs to apply
+standard_column_transforms = {x: to_datetime64 for x in TIME_COLUMNS}
 
 
 def _pass_through_dataframe(df: pd.DataFrame):
@@ -20,14 +29,6 @@ def _pass_through_dataframe(df: pd.DataFrame):
 def _merge_dicts(dict1: Mapping, dict2: Mapping) -> Mapping:
     """ Merge two mappings (dict-likes) together. """
     return {**dict1, **dict2}
-
-
-def _timestampit(maybe_time):
-    """ Convert a possible time object to UTCDateTime and get timestamp or
-    return None. """
-    if pd.isnull(maybe_time):
-        return maybe_time
-    return obspy.UTCDateTime(maybe_time).timestamp
 
 
 def _get_output_dict(obj, name, func):
@@ -65,10 +66,13 @@ class DataFrameExtractor(UserDict):
     pass_dataframe
         If True, return dataframes passed to DataFrameExtractor.__call__.
         This allows the DataFrameExtractor to be idempotent.
-    utc_columns
+    column_funcs
         Columns that are UTCDateTime objects. Will correctly handle
         UTCDateTime-able objects (like date-time strings, floats, etc).
     """
+
+    nslc = set(NSLC)
+    nslc.add("seed_id")
 
     def __init__(
         self,
@@ -76,14 +80,14 @@ class DataFrameExtractor(UserDict):
         required_columns: Sequence[str] = None,
         dtypes=None,
         pass_dataframe=True,
-        utc_columns=None,
+        column_funcs: Optional[column_function_map_type] = None,
     ):
         super().__init__()
         self.cls = cls
         self._func = singledispatch(self._base_call)
         self._base_required_columns = required_columns
         self._dtypes = [dtypes] if dtypes is not None else []
-        self.utc_columns = utc_columns
+        self._column_funcs = column_funcs or ()
         if pass_dataframe:
             self._func.register(pd.DataFrame)(_pass_through_dataframe)
 
@@ -123,7 +127,7 @@ class DataFrameExtractor(UserDict):
         """
         Registers an alternate constructor.
 
-        Registers an althernate constructor that is called when the input is
+        Registers an alternate constructor that is called when the input is
         not an instance of the expected class. This is useful, for examples to
         make the DataFrameExtractor idempotent or to default to various read
         methods in a path/str is passed.
@@ -180,7 +184,8 @@ class DataFrameExtractor(UserDict):
 
         return pd.DataFrame(rows)
 
-    def copy(self):
+    def copy(self) -> "DataFrameExtractor":
+        """Return a deep copy of the fetcher."""
         return copy.deepcopy(self)
 
     def __call__(self, obj, **kwargs) -> pd.DataFrame:
@@ -196,13 +201,24 @@ class DataFrameExtractor(UserDict):
         """
         df = self._func(obj, **kwargs)
         assert isinstance(df, pd.DataFrame), "must return a DataFrame instance"
-        if not df.empty:  # if df is not empty it should have all the columns
-            # read in any UTCDateTime
-            for col in iterate(self.utc_columns):
-                df[col] = df[col].apply(_timestampit)
-        replace, dtypes = {"nan": ""}, self.dtypes
-        required_cols = self._base_required_columns
-        return order_columns(df, required_cols, dtypes, replace)
+        out = (
+            df.pipe(apply_funcs_to_columns, funcs=self._column_funcs)
+            .pipe(order_columns, required_columns=self._base_required_columns)
+            .pipe(cast_dtypes, dtype=self.dtypes)
+            .pipe(replace_or_swallow, {"nan": "", "None": "", "<NA>": ""})
+        )
+        # If the extracted info contains NSLC information, make sure the seed_id matches
+        if self.nslc.issubset(out.columns):
+            out["seed_id"] = (
+                out["network"]
+                + "."
+                + out["station"]
+                + "."
+                + out["location"]
+                + "."
+                + out["channel"]
+            )
+        return out
 
     def __str__(self):
         msg = (

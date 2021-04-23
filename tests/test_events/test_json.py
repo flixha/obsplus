@@ -10,7 +10,7 @@ import pytest
 from obspy.core.event import CreationInfo, Catalog, Event
 
 from obsplus import json_to_cat, cat_to_dict, cat_to_json
-from obsplus.utils import yield_obj_parent_attr
+from obsplus.utils.misc import yield_obj_parent_attr
 
 
 def _remove_empty_quantity_errors(catalog):
@@ -47,8 +47,8 @@ class TestCat2Json:
     def json_cat_from_disk(self, cat_from_json):
         """ save the json events to disk and read it again into memory """
         tf = tempfile.mkstemp()
-        cat_from_json = obspy.Catalog(cat_from_json)
-        cat_from_json.write(tf[1], "quakeml")
+        new_cat_from_json = cat_from_json
+        new_cat_from_json.write(tf[1], "quakeml")
         cat = obspy.read_events(tf[1])
         return cat
 
@@ -67,14 +67,34 @@ class TestCat2Json:
         assert cat1 == cat2
 
     def test_catalog_can_be_written(self, test_catalog, json_cat_from_disk):
-        """ ensure the events can be written then read in again and is
-        still equal """
+        """
+        Ensure the events can be written then read in again and is
+        still equal.
+        """
         assert test_catalog == json_cat_from_disk
+
+    def test_single_event(self):
+        """Ensure a single event can be converted to json."""
+        event = obspy.read_events()[0]
+        out = cat_to_json(event)
+        assert isinstance(out, str)
+        cat_again = json_to_cat(out)
+        assert len(cat_again) == 1
+
+    def test_list_of_events(self):
+        """Ensure a list of events can be converted to json."""
+        events = obspy.read_events().events
+        out = cat_to_json(events)
+        assert isinstance(out, str)
+        cat_again = json_to_cat(out)
+        assert len(cat_again) == len(events)
 
 
 class TestSerializeUTCDateTime:
-    """ ensure obsplus can serialize datetimes without loss.
-    motivated by https://github.com/obspy/obspy/issues/2034 """
+    """
+    Ensure obsplus can serialize datetimes without loss.
+    motivated by https://github.com/obspy/obspy/issues/2034
+    """
 
     # timestamps to test that can be serialized
     times = [
@@ -90,8 +110,9 @@ class TestSerializeUTCDateTime:
     # helper functions
     @staticmethod
     def create_catalog(time):
-        """ create a events object with a UTCTimeObject as event creation
-        info """
+        """
+        Create a events object with a UTCTimeObject as event creation info.
+        """
         creation_info = CreationInfo(creation_time=obspy.UTCDateTime(time))
         event = Event(creation_info=creation_info)
         return Catalog(events=[event])

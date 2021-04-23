@@ -3,3 +3,6 @@ ipykernel
 numpydoc
 sphinx_autodoc_typehints
 nbsphinx
+sphinx-automodapi
+jinja2
+typer

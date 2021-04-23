@@ -10,12 +10,12 @@ import obspy
 from obspy.clients.fdsn import Client
 from obspy.core.inventory import Network, Channel, Station
 
-from obsplus.utils import get_instances
+from obsplus.utils.misc import get_instances_from_tree
 
-UNSOPPORTED = {"latitude", "longitude", "matchtimeseries", "minradius", "maxradius"}
+UNSUPPORTED = {"latitude", "longitude", "matchtimeseries", "minradius", "maxradius"}
 
 CLIENT_ARGS = set(inspect.signature(Client.get_stations).parameters)
-SUPPORTED_ARGS = CLIENT_ARGS - UNSOPPORTED
+SUPPORTED_ARGS = CLIENT_ARGS - UNSUPPORTED
 
 
 def match(name, patern):
@@ -80,6 +80,7 @@ def _keep_obj(obj, **kwargs) -> bool:
     the required attrs and meet the requirements.
     """
     assert set(PARAMS).issuperset(set(kwargs))
+    met_requirement = False  # switch if any requirements have been met
     for parameter, requirement in kwargs.items():
         attr, oper = PARAMS[parameter], OPERATORS[parameter]
         # add network, station, channel codes if applicable
@@ -87,16 +88,18 @@ def _keep_obj(obj, **kwargs) -> bool:
             value = getattr(obj, attr)
             if not oper(value, requirement):
                 return False
-    return True
+            else:
+                met_requirement = True
+    return met_requirement
 
 
 def _filter(obj, cls, **kwargs):
-    return (x for x in get_instances(obj, cls) if _keep_obj(x, **kwargs))
+    out = (x for x in get_instances_from_tree(obj, cls=cls) if _keep_obj(x, **kwargs))
+    return out
 
 
 def _get_keep_ids(inv, **kwargs):
-    """ return the id of all objects that either meet the filter
-    requirements """
+    """Return the id of objects that meet the filter requirements."""
     _add_codes(inv)
     nets = {id(x) for x in _filter(inv, Network, **kwargs)}
     stas = {id(x) for x in _filter(inv, Station, **kwargs)}
@@ -124,9 +127,7 @@ def get_stations(inv: obspy.Inventory, **kwargs) -> obspy.Inventory:
             # only keep channels that meet reqs.
             sta.channels = [x for x in sta.channels if id(x) in keep_ids]
         # only keep stations that meet reqs or have channels that do
-        net.stations = [
-            x for x in net.stations if id(x) in keep_ids or len(net.stations)
-        ]
+        net.stations = [x for x in net.stations if id(x) in keep_ids or len(x.channels)]
     # only keep networks that have some stations
     inv.networks = [x for x in inv.networks if len(x.stations)]
     return inv

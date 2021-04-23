@@ -1,0 +1,30 @@
+# .coveragerc to control coverage.py
+# based on this example: https://coverage.readthedocs.io/en/latest/config.html
+
+[run]
+branch = True
+
+[report]
+# Regexes for lines to exclude from consideration
+exclude_lines =
+    # Have to re-enable the standard pragma
+    pragma: no cover
+
+    # Don't complain if tests don't hit defensive assertion code:
+    raise AssertionError
+    raise NotImplementedError
+
+    # Don't complain if non-runnable code isn't run:
+    if 0:
+    if __name__ == .__main__.:
+
+omit =
+    # Dont include local tests dataset runs (these only run once)
+    obsplus/datasets/*test.py
+    # dont include versioneer's version script (testing that is on them)
+    obsplus/_version.py
+
+ignore_errors = True
+
+[html]
+directory = coverage_html_report

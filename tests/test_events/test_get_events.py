@@ -6,7 +6,9 @@ import copy
 import obspy
 import pandas as pd
 import pytest
+from obsplus.utils.misc import suppress_warnings
 from obspy.core.event import CreationInfo
+from obspy.geodetics import gps2dist_azimuth
 
 
 # ---------------------- module fixtures
@@ -60,7 +62,7 @@ class TestGetEvents:
         assert len(out) == 1
         assert out[0] == catalog[0]
 
-    def test_test_update_after(self, catalog):
+    def test_update_after(self, catalog):
         """ test that ids can be used to filter """
         eve = catalog[0]
         time = obspy.UTCDateTime("2017-05-04")
@@ -75,6 +77,42 @@ class TestGetEvents:
         cat2 = catalog.get_events(minlatitude=None, maxlatitude=None)
         assert len(cat1) == len(cat2)
         assert cat1 == cat2
+
+    def test_radius_degrees(self, catalog):
+        """ ensure the max_radius works with degrees specified. """
+        lat, lon = 39.342, 41.044
+        with suppress_warnings():
+            cat = catalog.get_events(latitude=lat, longitude=lon, maxradius=8)
+        # For the example catalog there should be exactly 2 events included
+        assert len(cat) == 2
+
+    def test_circular_search_no_events(self, catalog):
+        """ Ensure no errors if no events within rectangular region. #177 """
+        lat, lon = 31.0, 30.0
+        with suppress_warnings():
+            cat = catalog.get_events(latitude=lat, longitude=lon, maxradius=1)
+        assert len(cat) == 0
+
+    def test_max_min_radius_m(self, catalog):
+        """ Ensure max and min radius work in m (ie when degrees=False). """
+        minrad = 10000
+        maxrad = 800_000
+        lat, lon = 39.342, 41.044
+        kwargs = dict(
+            latitude=lat,
+            longitude=lon,
+            minradius=minrad,
+            maxradius=maxrad,
+            degrees=False,
+        )
+
+        with suppress_warnings():  # suppress geograhiclib warning
+            df = catalog.get_events(**kwargs).get_event_summary()
+
+        for _, row in df.iterrows():
+            args = (row.latitude, row.longitude, lat, lon)
+            dist, _, _ = gps2dist_azimuth(*args)
+            assert minrad < dist < maxrad
 
 
 class TestGetEventSummary:
